@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/server.js" },
+    { "source": "/customer/(.*)", "destination": "/api/server.js" },
+    { "source": "/orders(.*)", "destination": "/api/server.js" },
+    { "source": "/produk(.*)", "destination": "/api/server.js" },
+    { "source": "/stok(.*)", "destination": "/api/server.js" }
+  ]
+}
