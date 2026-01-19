@@ -98,7 +98,10 @@ function userFacingDbMessage(err, fallback) {
     return "Struktur tabel tidak sesuai dengan query API. Pastikan schema SQL yang di-import sesuai dengan project.";
   }
 
-  if (code === "ER_ACCESS_DENIED_ERROR" || code === "ER_DBACCESS_DENIED_ERROR") {
+  if (
+    code === "ER_ACCESS_DENIED_ERROR" ||
+    code === "ER_DBACCESS_DENIED_ERROR"
+  ) {
     return "Akses database ditolak. Cek DB_USER / DB_PASSWORD dan permission user di TiDB Cloud.";
   }
 
@@ -110,7 +113,8 @@ function userFacingDbMessage(err, fallback) {
     return "Masalah SSL/TLS. Pastikan DB_SSL_CA_PEM berisi CA cert yang benar dari TiDB Cloud.";
   }
 
-  return fallback || "Database error";
+  const base = fallback || "Database error";
+  return code ? `${base} (code: ${code})` : base;
 }
 
 // ================== CRUD API ==================
@@ -161,12 +165,17 @@ app.post("/customer/create", (req, res) => {
     [e],
     (checkErr, checkRows) => {
       if (checkErr) {
-        return res
-          .status(500)
-          .json({
-            message: userFacingDbMessage(checkErr, "Gagal cek email"),
-            error: { code: checkErr && checkErr.code, message: checkErr && checkErr.message },
-          });
+        console.error("DB error in /customer/create email check:", {
+          code: checkErr && checkErr.code,
+          message: checkErr && checkErr.message,
+        });
+        return res.status(500).json({
+          message: userFacingDbMessage(checkErr, "Gagal cek email"),
+          error: {
+            code: checkErr && checkErr.code,
+            message: checkErr && checkErr.message,
+          },
+        });
       }
 
       if (Array.isArray(checkRows) && checkRows.length) {
@@ -179,11 +188,16 @@ app.post("/customer/create", (req, res) => {
       const sql =
         "INSERT INTO customer (username, email, password) VALUES (?, ?, ?)";
       pool.query(sql, [u, e, p], (err) => {
-        if (err)
+        if (err) {
+          console.error("DB error in /customer/create insert:", {
+            code: err && err.code,
+            message: err && err.message,
+          });
           return res.status(500).json({
             message: userFacingDbMessage(err, "Gagal insert"),
             error: { code: err && err.code, message: err && err.message },
           });
+        }
         res.status(201).json({ message: "Customer baru tersimpan." });
       });
     },
@@ -210,11 +224,16 @@ app.post("/customer/login", (req, res) => {
   const sql =
     "SELECT user_Id AS user_id, username, email FROM customer WHERE email = ? AND password = ? LIMIT 1";
   pool.query(sql, [e, p], (err, results) => {
-    if (err)
+    if (err) {
+      console.error("DB error in /customer/login:", {
+        code: err && err.code,
+        message: err && err.message,
+      });
       return res.status(500).json({
         message: userFacingDbMessage(err, "Gagal login"),
         error: { code: err && err.code, message: err && err.message },
       });
+    }
 
     if (!Array.isArray(results) || results.length === 0) {
       return res.status(401).json({ message: "Email atau password salah." });
