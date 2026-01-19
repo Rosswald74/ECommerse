@@ -14,13 +14,21 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname)));
 
 // Koneksi Database
+const sslCaPemRaw = String(process.env.DB_SSL_CA_PEM || "");
 const sslCaPath = String(process.env.DB_SSL_CA || "").trim();
-const sslConfig = sslCaPath
+
+const sslConfig = sslCaPemRaw.trim()
   ? {
-      ca: fs.readFileSync(sslCaPath),
+      // Vercel env var often stores newlines as \n
+      ca: sslCaPemRaw.replace(/\\n/g, "\n"),
       rejectUnauthorized: true,
     }
-  : undefined;
+  : sslCaPath
+    ? {
+        ca: fs.readFileSync(sslCaPath),
+        rejectUnauthorized: true,
+      }
+    : undefined;
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -79,6 +87,24 @@ function toPositiveInt(value) {
 }
 
 // ================== CRUD API ==================
+
+// Health check for Vercel + DB connectivity
+app.get(["/health", "/api/health"], async (req, res) => {
+  try {
+    const [rows] = await pool.promise().query("SELECT 1 AS ok");
+    res.json({ ok: true, db: true, rows });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      db: false,
+      message: "DB connection failed",
+      error: {
+        code: err && err.code,
+        message: err && err.message,
+      },
+    });
+  }
+});
 
 // CREATE - Insert Data Baru
 app.post("/customer/create", (req, res) => {
