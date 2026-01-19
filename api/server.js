@@ -130,7 +130,7 @@ app.post("/customer/create", (req, res) => {
 
   // optional guard: prevent duplicate emails (friendlier than raw SQL error)
   pool.query(
-    "SELECT user_id FROM customer WHERE email = ? LIMIT 1",
+    "SELECT user_Id FROM customer WHERE email = ? LIMIT 1",
     [e],
     (checkErr, checkRows) => {
       if (checkErr) {
@@ -175,7 +175,7 @@ app.post("/customer/login", (req, res) => {
   }
 
   const sql =
-    "SELECT user_id, username, email FROM customer WHERE email = ? AND password = ? LIMIT 1";
+    "SELECT user_Id AS user_id, username, email FROM customer WHERE email = ? AND password = ? LIMIT 1";
   pool.query(sql, [e, p], (err, results) => {
     if (err)
       return res.status(500).json({ message: "Gagal login", error: err });
@@ -259,7 +259,7 @@ app.post("/orders", async (req, res) => {
       };
 
       const userRows = await q(
-        "SELECT user_id FROM customer WHERE user_id = ? LIMIT 1",
+        "SELECT user_Id FROM customer WHERE user_Id = ? LIMIT 1",
         [uid],
       );
       if (!Array.isArray(userRows) || userRows.length === 0) {
@@ -402,7 +402,7 @@ app.post("/orders", async (req, res) => {
 // READ - Tampilkan Semua Akun Customer
 app.get("/customer", (req, res) => {
   const sql =
-    "SELECT user_id, username, email, password, tanggalDibuat FROM customer ORDER BY user_id DESC";
+    "SELECT user_Id AS user_id, username, email, password, tanggalDibuat FROM customer ORDER BY user_Id DESC";
   pool.query(sql, (err, results) => {
     if (err)
       return res
@@ -454,7 +454,7 @@ app.get("/orders", (req, res) => {
 // Hapus AKUN CUSTOMER
 app.get("/customer/delete/:id", (req, res) => {
   const { id } = req.params;
-  const sql = "DELETE FROM customer WHERE user_id = ?";
+  const sql = "DELETE FROM customer WHERE user_Id = ?";
   pool.query(sql, [id], (err, result) => {
     if (err)
       return res.status(500).json({ message: "Gagal hapus!", error: err });
