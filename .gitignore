@@ -1,0 +1,51 @@
+############################
+# Node / npm
+############################
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+############################
+# Environment / secrets
+############################
+.env
+.env.*
+!.env.example
+
+############################
+# TLS / certificates / keys
+############################
+*.pem
+*.crt
+*.key
+*.pfx
+*.p12
+
+############################
+# Runtime / uploads
+############################
+uploads/
+
+############################
+# Build output (if any)
+############################
+dist/
+build/
+coverage/
+
+############################
+# OS / editor
+############################
+.DS_Store
+Thumbs.db
+
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+
+############################
+# Vercel
+############################
+.vercel/
