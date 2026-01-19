@@ -30,29 +30,46 @@ const sslConfig = sslCaPemRaw.trim()
       }
     : undefined;
 
-const pool = mysql.createPool({
+const dbName = String(process.env.DB_NAME || "").trim();
+
+const basePoolConfig = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
   port: Number(process.env.DB_PORT || 4000),
   ssl: sslConfig,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-});
+};
+
+// Pool without a default database.
+// This allows us to test connectivity even if DB_NAME database doesn't exist yet.
+const adminPool = mysql.createPool(basePoolConfig);
+
+let _appPool = null;
+function getAppPool() {
+  if (!dbName) {
+    throw new Error(
+      "DB_NAME belum diset. Set environment variable DB_NAME (mis. 'test' atau 'ecommerse').",
+    );
+  }
+  if (_appPool) return _appPool;
+  _appPool = mysql.createPool({ ...basePoolConfig, database: dbName });
+  return _appPool;
+}
 
 // Quick connectivity check (won't crash server on failure)
-pool.getConnection((err, conn) => {
+adminPool.getConnection((err, conn) => {
   if (err) {
-    console.error("❌ Koneksi DB gagal:", err.message || err);
+    console.error("❌ Koneksi DB (admin pool) gagal:", err.message || err);
     return;
   }
   conn.release();
-  console.log("✔ Terhubung ke database (pool ready)");
+  console.log("✔ Terhubung ke database server (admin pool ready)");
 });
 
-async function withTransaction(work) {
+async function withTransaction(pool, work) {
   const conn = await pool.promise().getConnection();
   try {
     await conn.beginTransaction();
@@ -122,8 +139,55 @@ function userFacingDbMessage(err, fallback) {
 // Health check for Vercel + DB connectivity
 app.get(["/health", "/api/health"], async (req, res) => {
   try {
-    const [rows] = await pool.promise().query("SELECT 1 AS ok");
-    res.json({ ok: true, db: true, rows });
+    // 1) Can we reach the TiDB/MySQL server at all?
+    const [rows] = await adminPool.promise().query("SELECT 1 AS ok");
+
+    // 2) Does DB_NAME exist?
+    let dbExists = null;
+    if (dbName) {
+      const [dbRows] = await adminPool
+        .promise()
+        .query(
+          "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ? LIMIT 1",
+          [dbName],
+        );
+      dbExists = Array.isArray(dbRows) && dbRows.length > 0;
+    }
+
+    // 3) If DB exists, can we query inside it?
+    let canQueryDb = null;
+    if (dbName && dbExists) {
+      try {
+        const pool = getAppPool();
+        await pool.promise().query("SELECT 1 AS ok");
+        canQueryDb = true;
+      } catch (_) {
+        canQueryDb = false;
+      }
+    }
+
+    res.json({
+      ok: true,
+      db: {
+        connect: true,
+        databaseProvided: Boolean(dbName),
+        databaseExists: dbExists,
+        canQueryDb,
+      },
+      rows,
+      debug: {
+        host: String(process.env.DB_HOST || ""),
+        port: Number(process.env.DB_PORT || 4000),
+        user: String(process.env.DB_USER || ""),
+        database: dbName || null,
+        ssl: {
+          enabled: Boolean(sslConfig),
+          from: sslCaPemRaw.trim() ? "pem" : sslCaPath ? "path" : null,
+          hasPem: Boolean(sslCaPemRaw.trim()),
+          hasPath: Boolean(sslCaPath),
+        },
+      },
+    });
   } catch (err) {
     res.status(500).json({
       ok: false,
@@ -139,6 +203,13 @@ app.get(["/health", "/api/health"], async (req, res) => {
 
 // CREATE - Insert Data Baru
 app.post("/customer/create", (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const { username, email, password } = req.body;
   const errors = {};
   const u = String(username || "").trim();
@@ -206,6 +277,13 @@ app.post("/customer/create", (req, res) => {
 
 // LOGIN - Validasi email + password
 app.post("/customer/login", (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const { email, password } = req.body;
   const errors = {};
   const e = String(email || "").trim();
@@ -245,6 +323,13 @@ app.post("/customer/login", (req, res) => {
 
 // CREATE ORDER + ITEMS + PAYMENT (transactional)
 app.post("/orders", async (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const { userId, deliveryMethod, deliveryAddress, items, paymentMethod } =
     req.body || {};
 
@@ -307,7 +392,7 @@ app.post("/orders", async (req, res) => {
   const payment = String(paymentMethod || "qr").trim() || "qr";
 
   try {
-    const result = await withTransaction(async (conn) => {
+    const result = await withTransaction(pool, async (conn) => {
       const q = async (sql, params = []) => {
         const [rows] = await conn.promise().query(sql, params);
         return rows;
@@ -456,6 +541,13 @@ app.post("/orders", async (req, res) => {
 
 // READ - Tampilkan Semua Akun Customer
 app.get("/customer", (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const sql =
     "SELECT user_Id AS user_id, username, email, password, tanggalDibuat FROM customer ORDER BY user_Id DESC";
   pool.query(sql, (err, results) => {
@@ -469,6 +561,13 @@ app.get("/customer", (req, res) => {
 
 // READ - Tampilkan Semua Produk
 app.get("/produk", (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const sql =
     "SELECT produk_id, nama, deskripsi, harga, jumlahItem FROM produk ORDER BY produk_id DESC";
   pool.query(sql, (err, results) => {
@@ -482,6 +581,13 @@ app.get("/produk", (req, res) => {
 
 // READ - Tampilkan Semua Stok
 app.get("/stok", (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const sql =
     "SELECT stok_id, produk_id, itemTersedia, tglUpdateItem FROM stok ORDER BY stok_id DESC";
   pool.query(sql, (err, results) => {
@@ -495,6 +601,13 @@ app.get("/stok", (req, res) => {
 
 // READ - Tampilkan Semua Order
 app.get("/orders", (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const sql =
     "SELECT order_id, user_id, delivery_method, delivery_address, total_amount, status, created_at FROM orders ORDER BY order_id DESC";
   pool.query(sql, (err, results) => {
@@ -508,6 +621,13 @@ app.get("/orders", (req, res) => {
 
 // Hapus AKUN CUSTOMER
 app.get("/customer/delete/:id", (req, res) => {
+  let pool;
+  try {
+    pool = getAppPool();
+  } catch (e) {
+    return res.status(500).json({ message: String(e.message || e) });
+  }
+
   const { id } = req.params;
   const sql = "DELETE FROM customer WHERE user_Id = ?";
   pool.query(sql, [id], (err, result) => {
