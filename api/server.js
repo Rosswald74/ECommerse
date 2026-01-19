@@ -86,6 +86,33 @@ function toPositiveInt(value) {
   return i;
 }
 
+function userFacingDbMessage(err, fallback) {
+  const code = err && err.code ? String(err.code) : "";
+  const msg = err && err.message ? String(err.message) : "";
+
+  if (code === "ER_NO_SUCH_TABLE" || /doesn't exist/i.test(msg)) {
+    return "Tabel database belum ada. Pastikan kamu sudah import schema SQL ke database yang dipakai (DB_NAME).";
+  }
+
+  if (code === "ER_BAD_FIELD_ERROR" || /Unknown column/i.test(msg)) {
+    return "Struktur tabel tidak sesuai dengan query API. Pastikan schema SQL yang di-import sesuai dengan project.";
+  }
+
+  if (code === "ER_ACCESS_DENIED_ERROR" || code === "ER_DBACCESS_DENIED_ERROR") {
+    return "Akses database ditolak. Cek DB_USER / DB_PASSWORD dan permission user di TiDB Cloud.";
+  }
+
+  if (code === "ENOTFOUND" || code === "ECONNREFUSED" || code === "ETIMEDOUT") {
+    return "Tidak bisa terhubung ke database. Cek DB_HOST/DB_PORT dan network access di TiDB Cloud.";
+  }
+
+  if (/SSL|CERT|certificate|self signed/i.test(msg)) {
+    return "Masalah SSL/TLS. Pastikan DB_SSL_CA_PEM berisi CA cert yang benar dari TiDB Cloud.";
+  }
+
+  return fallback || "Database error";
+}
+
 // ================== CRUD API ==================
 
 // Health check for Vercel + DB connectivity
@@ -136,7 +163,10 @@ app.post("/customer/create", (req, res) => {
       if (checkErr) {
         return res
           .status(500)
-          .json({ message: "Gagal cek email", error: checkErr });
+          .json({
+            message: userFacingDbMessage(checkErr, "Gagal cek email"),
+            error: { code: checkErr && checkErr.code, message: checkErr && checkErr.message },
+          });
       }
 
       if (Array.isArray(checkRows) && checkRows.length) {
@@ -150,7 +180,10 @@ app.post("/customer/create", (req, res) => {
         "INSERT INTO customer (username, email, password) VALUES (?, ?, ?)";
       pool.query(sql, [u, e, p], (err) => {
         if (err)
-          return res.status(500).json({ message: "Gagal insert", error: err });
+          return res.status(500).json({
+            message: userFacingDbMessage(err, "Gagal insert"),
+            error: { code: err && err.code, message: err && err.message },
+          });
         res.status(201).json({ message: "Customer baru tersimpan." });
       });
     },
@@ -178,7 +211,10 @@ app.post("/customer/login", (req, res) => {
     "SELECT user_Id AS user_id, username, email FROM customer WHERE email = ? AND password = ? LIMIT 1";
   pool.query(sql, [e, p], (err, results) => {
     if (err)
-      return res.status(500).json({ message: "Gagal login", error: err });
+      return res.status(500).json({
+        message: userFacingDbMessage(err, "Gagal login"),
+        error: { code: err && err.code, message: err && err.message },
+      });
 
     if (!Array.isArray(results) || results.length === 0) {
       return res.status(401).json({ message: "Email atau password salah." });
